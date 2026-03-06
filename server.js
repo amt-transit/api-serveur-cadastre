@@ -151,6 +151,92 @@ app.post('/api/parcelles', verifierToken, async (req, res) => {
         res.status(500).json({ erreur: "Erreur serveur" });
     }
 });
+// ==========================================
+// 📖 ROUTE : Récupérer l'historique d'une parcelle
+// ==========================================
+app.get('/api/parcelles/:id/historique', verifierToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        // On joint la table 'utilisateurs' pour récupérer l'email de la personne qui a fait l'action
+        const query = `
+            SELECT h.action, h.cree_le, u.email as auteur
+            FROM historique_modifications h
+            LEFT JOIN utilisateurs u ON h.utilisateur_id = u.id
+            WHERE h.parcelle_id = $1
+            ORDER BY h.cree_le DESC
+        `;
+        const resultat = await pool.query(query, [id]);
+        res.json(resultat.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ erreur: "Erreur lors de la récupération de l'historique" });
+    }
+});
+
+// ==========================================
+// ✏️ ROUTE PROTEGÉE : Modifier une parcelle (PUT)
+// ==========================================
+app.put('/api/parcelles/:id', verifierToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const donneesValidees = parcelleSchema.parse(req.body);
+
+        // 1. Récupérer l'ancienne version pour l'historique
+        const oldRes = await pool.query('SELECT * FROM parcelles WHERE id = $1', [id]);
+        if(oldRes.rows.length === 0) return res.status(404).json({erreur: "Parcelle introuvable"});
+        const ancienneParcelle = oldRes.rows[0];
+
+        // 2. Mettre à jour la parcelle
+        const requeteUpdate = `
+            UPDATE parcelles
+            SET reference = $1, proprietaire_nom = $2, surface = $3, zone = $4, statut = $5, geojson = $6
+            WHERE id = $7 RETURNING *
+        `;
+        const valeursUpdate = [
+            donneesValidees.ref, donneesValidees.nom, donneesValidees.surface,
+            donneesValidees.zone, donneesValidees.statut, JSON.stringify(donneesValidees.geojson), id
+        ];
+        const resultUpdate = await pool.query(requeteUpdate, valeursUpdate);
+        const parcelleAjour = resultUpdate.rows[0];
+
+        // 3. 🛡️ L'AUDIT TRAIL : Enregistrer la modification
+        await pool.query(`
+            INSERT INTO historique_modifications (parcelle_id, utilisateur_id, action, donnees_precedentes, nouvelles_donnees)
+            VALUES ($1, $2, $3, $4, $5)
+        `, [id, req.utilisateur.id, 'MODIFICATION', JSON.stringify(ancienneParcelle), JSON.stringify(parcelleAjour)]);
+
+        res.json(parcelleAjour);
+    } catch (err) {
+        if (err instanceof z.ZodError) return res.status(400).json({ erreurs: err.errors.map(e => e.message) });
+        console.error(err); res.status(500).json({ erreur: "Erreur serveur" });
+    }
+});
+
+// ==========================================
+// 🗑️ ROUTE PROTEGÉE : Supprimer une parcelle (DELETE)
+// ==========================================
+app.delete('/api/parcelles/:id', verifierToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+        // 1. Récupérer les données avant de les détruire
+        const oldRes = await pool.query('SELECT * FROM parcelles WHERE id = $1', [id]);
+        if(oldRes.rows.length === 0) return res.status(404).json({erreur: "Parcelle introuvable"});
+        const ancienneParcelle = oldRes.rows[0];
+
+        // 2. Supprimer la parcelle
+        await pool.query('DELETE FROM parcelles WHERE id = $1', [id]);
+
+        // 3. 🛡️ L'AUDIT TRAIL : Enregistrer la suppression
+        await pool.query(`
+            INSERT INTO historique_modifications (utilisateur_id, action, donnees_precedentes)
+            VALUES ($1, $2, $3)
+        `, [req.utilisateur.id, 'SUPPRESSION', JSON.stringify(ancienneParcelle)]);
+
+        res.json({ message: "Parcelle supprimée" });
+    } catch (err) {
+        console.error(err); res.status(500).json({ erreur: "Erreur serveur" });
+    }
+});
 
 // ==========================================
 // LANCEMENT DU SERVEUR
