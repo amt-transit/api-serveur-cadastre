@@ -1,3 +1,6 @@
+// On charge les variables d'environnement en tout premier
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -6,11 +9,17 @@ const app = express();
 app.use(cors());
 app.use(express.json()); 
 
-// 1. Connexion à ta base de données Supabase (Avec le bon serveur aws-1 !)
+// Vérification de sécurité au démarrage
+if (!process.env.DATABASE_URL) {
+    console.error("🚨 ERREUR FATALE: DATABASE_URL manquante dans le fichier .env");
+    process.exit(1); // On coupe le serveur si la BDD n'est pas configurée
+}
+
+// 1. Connexion à la base de données via la variable d'environnement
 const pool = new Pool({
-    connectionString: "postgresql://postgres.udtqeblrzcwtklyuzkez:ihs%40WGc.eWUC7N%2B@aws-1-eu-west-1.pooler.supabase.com:5432/postgres",
+    connectionString: process.env.DATABASE_URL,
     ssl: {
-        rejectUnauthorized: false // Toujours obligatoire pour le Cloud
+        rejectUnauthorized: false // Toujours obligatoire pour le Cloud Supabase
     }
 });
 
@@ -21,7 +30,7 @@ app.get('/api/parcelles', async (req, res) => {
         res.json(resultat.rows);
     } catch (err) {
         console.error("Erreur lors de la lecture :", err);
-        res.status(500).send("Erreur de lecture");
+        res.status(500).json({ erreur: "Erreur de lecture de la base de données" });
     }
 });
 
@@ -37,15 +46,16 @@ app.post('/api/parcelles', async (req, res) => {
     
     try {
         const resultat = await pool.query(requete, valeurs);
-        res.json(resultat.rows[0]); 
+        res.status(201).json(resultat.rows[0]); 
     } catch (err) {
         console.error("Erreur lors de l'écriture :", err);
-        res.status(500).send("Erreur d'enregistrement");
+        res.status(500).json({ erreur: "Erreur d'enregistrement dans la base de données" });
     }
 });
 
-// 4. Lancement du serveur (Adapté pour le Cloud)
+// 4. Lancement du serveur
+// process.env.PORT sera utilisé en production, sinon le port 3000 en local
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`✅ Serveur en ligne sur le port ${PORT}`);
+    console.log(`✅ Serveur sécurisé en ligne sur le port ${PORT}`);
 });
