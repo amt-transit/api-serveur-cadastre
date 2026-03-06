@@ -4,6 +4,17 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
+const { z } = require('zod');
+
+// Définition du schéma strict pour une Parcelle
+const parcelleSchema = z.object({
+  ref: z.string().min(3, "La référence doit faire au moins 3 caractères"),
+  nom: z.string().min(2, "Le nom du propriétaire est obligatoire"),
+  surface: z.number().positive("La surface doit être positive").nullable().optional(),
+  zone: z.string().optional(),
+  statut: z.enum(['Enregistrée', 'En attente', 'Litige', 'Vendue']),
+  geojson: z.any().optional() // On pourrait faire une validation GeoJSON stricte plus tard
+});
 
 const app = express();
 app.use(cors());
@@ -34,22 +45,39 @@ app.get('/api/parcelles', async (req, res) => {
     }
 });
 
-// 3. Route pour SAUVEGARDER une nouvelle parcelle
 app.post('/api/parcelles', async (req, res) => {
-    const { ref, nom, surface, zone, statut, geojson } = req.body;
-    
-    const requete = `
-        INSERT INTO parcelles (reference, proprietaire_nom, surface, zone, statut, geojson)
-        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *
-    `;
-    const valeurs = [ref, nom, surface, zone, statut, JSON.stringify(geojson)];
-    
     try {
+        // 1. LE BOUCLIER : Validation stricte des données entrantes
+        const donneesValidees = parcelleSchema.parse(req.body);
+        
+        // 2. Si ça passe, on prépare la requête
+        const requete = `
+            INSERT INTO parcelles (reference, proprietaire_nom, surface, zone, statut, geojson)
+            VALUES ($1, $2, $3, $4, $5, $6) RETURNING *
+        `;
+        const valeurs = [
+            donneesValidees.ref, 
+            donneesValidees.nom, 
+            donneesValidees.surface, 
+            donneesValidees.zone, 
+            donneesValidees.statut, 
+            JSON.stringify(donneesValidees.geojson)
+        ];
+        
         const resultat = await pool.query(requete, valeurs);
+        
+        // (Bientôt, ici, on ajoutera l'insertion dans la table historique_modifications)
+
         res.status(201).json(resultat.rows[0]); 
+        
     } catch (err) {
+        // Zod renvoie une erreur spécifique si la validation échoue
+        if (err instanceof z.ZodError) {
+            return res.status(400).json({ erreurs: err.errors.map(e => e.message) });
+        }
+        
         console.error("Erreur lors de l'écriture :", err);
-        res.status(500).json({ erreur: "Erreur d'enregistrement dans la base de données" });
+        res.status(500).json({ erreur: "Erreur serveur" });
     }
 });
 
