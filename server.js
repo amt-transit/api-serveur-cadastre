@@ -44,6 +44,18 @@ const verifierToken = (req, res, next) => {
         res.status(401).json({ erreur: "Jeton invalide ou expiré." });
     }
 };
+// ==========================================
+// MIDDLEWARE : Le "Vigile" des Administrateurs
+// ==========================================
+const verifierRoleAdmin = (req, res, next) => {
+    // req.utilisateur vient du middleware 'verifierToken' qui a tourné juste avant
+    if (req.utilisateur.role !== 'admin') {
+        return res.status(403).json({ 
+            erreur: "Accès refusé. Cette action nécessite des privilèges d'administrateur." 
+        });
+    }
+    next(); // C'est un admin, on le laisse passer !
+};
 
 // ==========================================
 // SCHÉMAS DE VALIDATION (Le Bouclier)
@@ -176,7 +188,7 @@ app.get('/api/parcelles/:id/historique', verifierToken, async (req, res) => {
 // ==========================================
 // ✏️ ROUTE PROTEGÉE : Modifier une parcelle (PUT)
 // ==========================================
-app.put('/api/parcelles/:id', verifierToken, async (req, res) => {
+app.put('/api/parcelles/:id', verifierToken, verifierRoleAdmin, async (req, res) => {
     const { id } = req.params;
     try {
         const donneesValidees = parcelleSchema.parse(req.body);
@@ -215,7 +227,7 @@ app.put('/api/parcelles/:id', verifierToken, async (req, res) => {
 // ==========================================
 // 🗑️ ROUTE PROTEGÉE : Supprimer une parcelle (DELETE)
 // ==========================================
-app.delete('/api/parcelles/:id', verifierToken, async (req, res) => {
+app.delete('/api/parcelles/:id', verifierToken, verifierRoleAdmin, async (req, res) => {
     const { id } = req.params;
     try {
         // 1. Récupérer les données avant de les détruire
