@@ -66,20 +66,34 @@ const parcelleSchema = z.object({
     surface: z.number().positive("La surface doit être positive").nullable().optional(),
     zone: z.string().optional(),
     statut: z.enum(['Enregistrée', 'En attente', 'Litige', 'Vendue']),
-    geojson: z.any().optional()
+    geojson: z.any().optional(),
+    // On ajoute tous les nouveaux champs ici :
+    type: z.string().optional(),
+    ilot: z.string().optional(),
+    obs: z.string().optional(),
+    tel: z.string().optional(),
+    cni: z.string().optional(),
+    adresse: z.string().optional(),
+    acquisition: z.string().optional()
 });
+
 
 // ==========================================
 // ROUTES AUTHENTIFICATION
 // ==========================================
 app.post('/api/auth/inscription', async (req, res) => {
-    const { email, mot_de_passe, role } = req.body;
+    const { nom, email, mot_de_passe, role } = req.body;
+
+    if (!nom || !email || !mot_de_passe) {
+        return res.status(400).json({ erreur: "Le nom, l'email et le mot de passe sont obligatoires." });
+    }
+
     try {
         const salt = await bcrypt.genSalt(10);
         const motDePasseHash = await bcrypt.hash(mot_de_passe, salt);
 
-        const requete = `INSERT INTO utilisateurs (email, mot_de_passe_hash, role) VALUES ($1, $2, $3) RETURNING id, email, role`;
-        const valeurs = [email, motDePasseHash, role || 'consultant'];
+        const requete = `INSERT INTO utilisateurs (nom, email, mot_de_passe_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, nom, email, role`;
+        const valeurs = [nom, email, motDePasseHash, role || 'consultant'];
         
         const resultat = await pool.query(requete, valeurs);
         res.status(201).json({ message: "Utilisateur créé avec succès", utilisateur: resultat.rows[0] });
@@ -110,7 +124,7 @@ app.post('/api/auth/connexion', async (req, res) => {
             { expiresIn: '24h' }
         );
 
-        res.json({ token, role: utilisateur.role });
+        res.json({ token, role: utilisateur.role, nom: utilisateur.nom });
     } catch (err) {
         console.error(err);
         res.status(500).json({ erreur: "Erreur serveur lors de la connexion" });
@@ -135,12 +149,18 @@ app.post('/api/parcelles', verifierToken, async (req, res) => {
         const donneesValidees = parcelleSchema.parse(req.body);
         
         const requeteParcelle = `
-            INSERT INTO parcelles (reference, proprietaire_nom, surface, zone, statut, geojson)
-            VALUES ($1, $2, $3, $4, $5, $6) RETURNING *
+            INSERT INTO parcelles (
+                reference, proprietaire_nom, surface, zone, statut, geojson,
+                type_usage, ilot_lot, observations, proprietaire_tel, 
+                proprietaire_cni, proprietaire_adresse, proprietaire_acquisition
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *
         `;
         const valeursParcelle = [
             donneesValidees.ref, donneesValidees.nom, donneesValidees.surface, 
-            donneesValidees.zone, donneesValidees.statut, JSON.stringify(donneesValidees.geojson)
+            donneesValidees.zone, donneesValidees.statut, JSON.stringify(donneesValidees.geojson),
+            donneesValidees.type, donneesValidees.ilot, donneesValidees.obs,
+            donneesValidees.tel, donneesValidees.cni, donneesValidees.adresse, donneesValidees.acquisition
         ];
         
         const resultatParcelle = await pool.query(requeteParcelle, valeursParcelle);
@@ -169,9 +189,9 @@ app.post('/api/parcelles', verifierToken, async (req, res) => {
 app.get('/api/parcelles/:id/historique', verifierToken, async (req, res) => {
     try {
         const { id } = req.params;
-        // On joint la table 'utilisateurs' pour récupérer l'email de la personne qui a fait l'action
+        // On joint la table 'utilisateurs' pour récupérer le nom (ou l'email à défaut) de la personne
         const query = `
-            SELECT h.action, h.cree_le, u.email as auteur
+            SELECT h.action, h.cree_le, COALESCE(u.nom, u.email) as auteur
             FROM historique_modifications h
             LEFT JOIN utilisateurs u ON h.utilisateur_id = u.id
             WHERE h.parcelle_id = $1
@@ -201,12 +221,17 @@ app.put('/api/parcelles/:id', verifierToken, verifierRoleAdmin, async (req, res)
         // 2. Mettre à jour la parcelle
         const requeteUpdate = `
             UPDATE parcelles
-            SET reference = $1, proprietaire_nom = $2, surface = $3, zone = $4, statut = $5, geojson = $6
-            WHERE id = $7 RETURNING *
+            SET reference = $1, proprietaire_nom = $2, surface = $3, zone = $4, statut = $5, geojson = $6,
+                type_usage = $7, ilot_lot = $8, observations = $9, proprietaire_tel = $10,
+                proprietaire_cni = $11, proprietaire_adresse = $12, proprietaire_acquisition = $13
+            WHERE id = $14 RETURNING *
         `;
         const valeursUpdate = [
             donneesValidees.ref, donneesValidees.nom, donneesValidees.surface,
-            donneesValidees.zone, donneesValidees.statut, JSON.stringify(donneesValidees.geojson), id
+            donneesValidees.zone, donneesValidees.statut, JSON.stringify(donneesValidees.geojson),
+            donneesValidees.type, donneesValidees.ilot, donneesValidees.obs,
+            donneesValidees.tel, donneesValidees.cni, donneesValidees.adresse, donneesValidees.acquisition,
+            id
         ];
         const resultUpdate = await pool.query(requeteUpdate, valeursUpdate);
         const parcelleAjour = resultUpdate.rows[0];
