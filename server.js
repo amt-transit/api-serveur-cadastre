@@ -206,6 +206,55 @@ app.get('/api/parcelles/:id/historique', verifierToken, async (req, res) => {
 });
 
 // ==========================================
+// 📖 ROUTE PROTEGÉE : Historique Global (Audit Trail pour Admin)
+// ==========================================
+app.get('/api/admin/audit', verifierToken, verifierRoleAdmin, async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                h.action, 
+                COALESCE(u.nom, u.email) as auteur, 
+                p.reference as reference_parcelle, 
+                h.cree_le
+            FROM historique_modifications h
+            LEFT JOIN utilisateurs u ON h.utilisateur_id = u.id
+            LEFT JOIN parcelles p ON h.parcelle_id = p.id
+            ORDER BY h.cree_le DESC
+        `;
+        const resultat = await pool.query(query);
+        res.json(resultat.rows);
+    } catch (err) {
+        console.error("Erreur lors de la récupération de l'audit :", err);
+        res.status(500).json({ erreur: "Erreur lors de la récupération de l'audit global" });
+    }
+});
+
+// ==========================================
+// 👤 ROUTE PROTEGÉE : Créer un utilisateur (Admin uniquement)
+// ==========================================
+app.post('/api/admin/utilisateurs', verifierToken, verifierRoleAdmin, async (req, res) => {
+    const { nom, email, mot_de_passe, role } = req.body;
+
+    if (!nom || !email || !mot_de_passe || !role) {
+        return res.status(400).json({ erreur: "Tous les champs (nom, email, mot_de_passe, role) sont obligatoires." });
+    }
+
+    try {
+        const salt = await bcrypt.genSalt(10);
+        const motDePasseHash = await bcrypt.hash(mot_de_passe, salt);
+
+        const requete = `INSERT INTO utilisateurs (nom, email, mot_de_passe_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, nom, email, role`;
+        const valeurs = [nom, email, motDePasseHash, role];
+        
+        const resultat = await pool.query(requete, valeurs);
+        res.status(201).json({ message: "Utilisateur créé avec succès", utilisateur: resultat.rows[0] });
+    } catch (err) {
+        console.error("Erreur lors de la création d'utilisateur :", err);
+        res.status(500).json({ erreur: "Erreur lors de la création de l'utilisateur (L'email est peut-être déjà utilisé)." });
+    }
+});
+
+// ==========================================
 // ✏️ ROUTE PROTEGÉE : Modifier une parcelle (PUT)
 // ==========================================
 app.put('/api/parcelles/:id', verifierToken, verifierRoleAdmin, async (req, res) => {
