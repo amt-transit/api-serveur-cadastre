@@ -191,7 +191,7 @@ app.get('/api/parcelles/:id/historique', verifierToken, async (req, res) => {
         const { id } = req.params;
         // On joint la table 'utilisateurs' pour récupérer le nom (ou l'email à défaut) de la personne
         const query = `
-            SELECT h.action, h.cree_le, COALESCE(u.nom, u.email) as auteur
+            SELECT h.action, h.cree_le, COALESCE(u.nom, u.email) as auteur, h.donnees_precedentes, h.nouvelles_donnees
             FROM historique_modifications h
             LEFT JOIN utilisateurs u ON h.utilisateur_id = u.id
             WHERE h.parcelle_id = $1
@@ -214,8 +214,10 @@ app.get('/api/admin/audit', verifierToken, verifierRoleAdmin, async (req, res) =
             SELECT 
                 h.action, 
                 COALESCE(u.nom, u.email) as auteur, 
-                p.reference as reference_parcelle, 
-                h.cree_le
+                p.reference as reference_parcelle,
+                h.cree_le,
+                h.donnees_precedentes,
+                h.nouvelles_donnees
             FROM historique_modifications h
             LEFT JOIN utilisateurs u ON h.utilisateur_id = u.id
             LEFT JOIN parcelles p ON h.parcelle_id = p.id
